@@ -10,64 +10,55 @@ Instrustion on running the script:
 """
 
 from __future__ import print_function, division
-import scipy
-import sys
-from keras.datasets import mnist
 from keras_contrib.layers.normalization.instancenormalization import InstanceNormalization
-from keras.layers import Input, Dense, Reshape, Flatten, Dropout, Concatenate
-from keras.layers import BatchNormalization, Activation, ZeroPadding2D, Add
+from keras.layers import Input, Dense
+from keras.layers import BatchNormalization, Activation, Add
 from keras.layers.advanced_activations import PReLU, LeakyReLU
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.applications import VGG19
-from keras.models import Sequential, Model
+from keras.models import Model
 from keras.optimizers import Adam
 import datetime
 import matplotlib.pyplot as plt
-import sys
 from data_loader import DataLoader
 import numpy as np
 import os
+import argparse
 
-import keras.backend as K
+parser = argparse.ArgumentParser()
+parser.add_argument('--datadir', type = str, default = './data', help = 'data directory')
+parser.add_argument('--outputdir', type = str, default = './outputs', help = 'output directory')
+parser.add_argument('--upscale', type = int, default = 4, help = 'upscaling factor')
+parser.add_argument('--inputdim', type = int, default = 64, help = 'input image dimensions(square image)')
+parser.add_argument('--nresblocks', type = int, default = 16, help = 'number of residual blocks')
+parser.add_argument('--lr', type = float, default = 0.0002, help = 'learning rate')
+parser.add_argument('--epochs', type = str, default = 10000, help = 'number of epochs')
+parser.add_argument('--batchsize', type = str, default = 1, help = 'batch size')
+args = parser.parse_args()
 
-dataset_dir = sys.argv[1]
-output_dir = sys.argv[2]
-upscaling_factor = sys.argv[3]
-input_height_width = sys.argv[4]
-n_res = sys.argv[5]
-learning_rate = sys.argv[6]
-num_epochs = sys.argv[7]
-batch = sys.argv[8] 
-
-class SRGAN():    
+class SRGAN():
     def __init__(self):
-        # Input shape        
+        # Input shape
         
         self.channels = 3
-        self.lr_height = input_height_width                # Low resolution height
-        self.lr_width = input_height_width                  # Low resolution width
+        self.lr_height = args.inputdim                # Low resolution height
+        self.lr_width = args.inputdim                  # Low resolution width
         self.lr_shape = (self.lr_height, self.lr_width, self.channels)
-        self.hr_height = self.lr_height*upscaling_factor   # High resolution height
-        self.hr_width = self.lr_width*upscaling_factor     # High resolution width
+        self.hr_height = self.lr_height * args.upscale   # High resolution height
+        self.hr_width = self.lr_width * args.upscale     # High resolution width
         self.hr_shape = (self.hr_height, self.hr_width, self.channels)
 
         # Number of residual blocks in the generator
-        self.n_residual_blocks = n_res
+        self.n_residual_blocks = args.nresblocks
 
-        optimizer = Adam(learning_rate, 0.5)
-
-        # We use a pre-trained VGG19 model to extract image features from the high resolution
-        # and the generated high resolution images and minimize the mse between them
+        optimizer = Adam(args.lr, 0.5)
         self.vgg = self.build_vgg()
         self.vgg.trainable = False
-        self.vgg.compile(loss='mse',
-            optimizer=optimizer,
-            metrics=['accuracy'])
+        self.vgg.compile(loss = 'mse', optimizer = optimizer, metrics = ['accuracy'])
 
         # Configure data loader
-        self.dataset_name = dataset_dir #'./datasets/img_align_celeba'
-        self.data_loader = DataLoader(dataset_name=self.dataset_name,
-                                      img_res=(self.hr_height, self.hr_width))
+        self.dataset_name = args.datadir #'./datasets/img_align_celeba'
+        self.data_loader = DataLoader(dataset_name = self.dataset_name, img_res = (self.hr_height, self.hr_width))
 
         # Calculate output shape of D (PatchGAN)
         patch = int(self.hr_height / 2**4)
@@ -79,16 +70,14 @@ class SRGAN():
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
-        self.discriminator.compile(loss='mse',
-            optimizer=optimizer,
-            metrics=['accuracy'])
+        self.discriminator.compile(loss = 'mse', optimizer = optimizer, metrics = ['accuracy'])
 
         # Build the generator
         self.generator = self.build_generator()
 
         # High res. and low res. images
-        img_hr = Input(shape=self.hr_shape)
-        img_lr = Input(shape=self.lr_shape)
+        img_hr = Input(shape = self.hr_shape)
+        img_lr = Input(shape = self.lr_shape)
 
         # Generate high res. version from low res.
         fake_hr = self.generator(img_lr)
@@ -103,9 +92,7 @@ class SRGAN():
         validity = self.discriminator(fake_hr)
 
         self.combined = Model([img_lr, img_hr], [validity, fake_features])
-        self.combined.compile(loss=['binary_crossentropy', 'mse'],
-                              loss_weights=[1e-3, 1],
-                              optimizer=optimizer)
+        self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
 
 
     def build_vgg(self):
@@ -113,12 +100,12 @@ class SRGAN():
         Builds a pre-trained VGG19 model that outputs image features extracted at the
         third block of the model
         """
-        vgg = VGG19(weights="imagenet")
+        vgg = VGG19(weights = "imagenet")
         # Set outputs to outputs of last conv. layer in block 3
         # See architecture at: https://github.com/keras-team/keras/blob/master/keras/applications/vgg19.py
         vgg.outputs = [vgg.layers[9].output]
 
-        img = Input(shape=self.hr_shape)
+        img = Input(shape = self.hr_shape)
 
         # Extract image features
         img_features = vgg(img)
@@ -129,26 +116,26 @@ class SRGAN():
 
         def residual_block(layer_input, filters):
             """Residual block described in paper"""
-            d = Conv2D(filters, kernel_size=3, strides=1, padding='same')(layer_input)
+            d = Conv2D(filters, kernel_size = 3, strides = 1, padding = 'same')(layer_input)
             d = Activation('relu')(d)
-            d = BatchNormalization(momentum=0.8)(d)
-            d = Conv2D(filters, kernel_size=3, strides=1, padding='same')(d)
-            d = BatchNormalization(momentum=0.8)(d)
+            d = BatchNormalization(momentum = 0.8)(d)
+            d = Conv2D(filters, kernel_size = 3, strides = 1, padding = 'same')(d)
+            d = BatchNormalization(momentum = 0.8)(d)
             d = Add()([d, layer_input])
             return d
 
         def deconv2d(layer_input):
             """Layers used during upsampling"""
-            u = UpSampling2D(size=2)(layer_input)
-            u = Conv2D(256, kernel_size=3, strides=1, padding='same')(u)
+            u = UpSampling2D(size = 2)(layer_input)
+            u = Conv2D(256, kernel_size = 3, strides = 1, padding = 'same')(u)
             u = Activation('relu')(u)
             return u
 
         # Low resolution image input
-        img_lr = Input(shape=self.lr_shape)
+        img_lr = Input(shape = self.lr_shape)
 
         # Pre-residual block
-        c1 = Conv2D(64, kernel_size=9, strides=1, padding='same')(img_lr)
+        c1 = Conv2D(64, kernel_size = 9, strides = 1, padding = 'same')(img_lr)
         c1 = Activation('relu')(c1)
 
         # Propogate through residual blocks
@@ -157,8 +144,8 @@ class SRGAN():
             r = residual_block(r, self.gf)
 
         # Post-residual block
-        c2 = Conv2D(64, kernel_size=3, strides=1, padding='same')(r)
-        c2 = BatchNormalization(momentum=0.8)(c2)
+        c2 = Conv2D(64, kernel_size = 3, strides = 1, padding = 'same')(r)
+        c2 = BatchNormalization(momentum = 0.8)(c2)
         c2 = Add()([c2, c1])
 
         # Upsampling
@@ -166,47 +153,43 @@ class SRGAN():
         u2 = deconv2d(u1)
 
         # Generate high resolution output
-        gen_hr = Conv2D(self.channels, kernel_size=9, strides=1, padding='same', activation='tanh')(u2)
+        gen_hr = Conv2D(self.channels, kernel_size = 9, strides = 1, padding = 'same', activation = 'tanh')(u2)
 
         return Model(img_lr, gen_hr)
 
     def build_discriminator(self):
 
-        def d_block(layer_input, filters, strides=1, bn=True):
+        def d_block(layer_input, filters, strides = 1, bn = True):
             """Discriminator layer"""
-            d = Conv2D(filters, kernel_size=3, strides=strides, padding='same')(layer_input)
-            d = LeakyReLU(alpha=0.2)(d)
+            d = Conv2D(filters, kernel_size = 3, strides = strides, padding = 'same')(layer_input)
+            d = LeakyReLU(alpha = 0.2)(d)
             if bn:
-                d = BatchNormalization(momentum=0.8)(d)
+                d = BatchNormalization(momentum = 0.8)(d)
             return d
 
         # Input img
-        d0 = Input(shape=self.hr_shape)
+        d0 = Input(shape = self.hr_shape)
 
-        d1 = d_block(d0, self.df, bn=False)
-        d2 = d_block(d1, self.df, strides=2)
-        d3 = d_block(d2, self.df*2)
-        d4 = d_block(d3, self.df*2, strides=2)
-        d5 = d_block(d4, self.df*4)
-        d6 = d_block(d5, self.df*4, strides=2)
-        d7 = d_block(d6, self.df*8)
-        d8 = d_block(d7, self.df*8, strides=2)
+        d1 = d_block(d0, self.df, bn = False)
+        d2 = d_block(d1, self.df, strides = 2)
+        d3 = d_block(d2, self.df * 2)
+        d4 = d_block(d3, self.df * 2, strides = 2)
+        d5 = d_block(d4, self.df * 4)
+        d6 = d_block(d5, self.df * 4, strides = 2)
+        d7 = d_block(d6, self.df * 8)
+        d8 = d_block(d7, self.df * 8, strides = 2)
 
-        d9 = Dense(self.df*16)(d8)
-        d10 = LeakyReLU(alpha=0.2)(d9)
-        validity = Dense(1, activation='sigmoid')(d10)
+        d9 = Dense(self.df * 16)(d8)
+        d10 = LeakyReLU(alpha = 0.2)(d9)
+        validity = Dense(1, activation = 'sigmoid')(d10)
 
         return Model(d0, validity)
 
-    def train(self, epochs, batch_size=1, sample_interval=50):
+    def train(self, epochs, batch_size = 1, sample_interval = 50):
 
         start_time = datetime.datetime.now()
 
         for epoch in range(epochs):
-
-            # ----------------------
-            #  Train Discriminator
-            # ----------------------
 
             # Sample images and their conditioning counterparts
             imgs_hr, imgs_lr = self.data_loader.load_data(batch_size)
@@ -221,10 +204,6 @@ class SRGAN():
             d_loss_real = self.discriminator.train_on_batch(imgs_hr, valid)
             d_loss_fake = self.discriminator.train_on_batch(fake_hr, fake)
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-
-            # ------------------
-            #  Train Generator
-            # ------------------
 
             # Sample images and their conditioning counterparts
             imgs_hr, imgs_lr = self.data_loader.load_data(batch_size)
@@ -247,7 +226,7 @@ class SRGAN():
                 self.sample_images(epoch)
 
     def sample_images(self, epoch):
-        os.makedirs(output_dir + '/%s' % self.dataset_name, exist_ok=True)
+        os.makedirs(args.outputdir, exist_ok = True)
         r, c = 2, 2
 
         imgs_hr, imgs_lr = self.data_loader.load_data(batch_size=2, is_testing=True)
@@ -268,16 +247,16 @@ class SRGAN():
                 axs[row, col].set_title(titles[col])
                 axs[row, col].axis('off')
             cnt += 1
-        fig.savefig(output_dir + "/%s/%d.png" % (self.dataset_name, epoch))
+        fig.savefig(args.outputdir + "/%d.png" % (epoch))
         plt.close()
 
         # Save low resolution images for comparison
         for i in range(r):
             fig = plt.figure()
             plt.imshow(imgs_lr[i])
-            fig.savefig('images/%s/%d_lowres%d.png' % (self.dataset_name, epoch, i))
+            fig.savefig(args.outputdir + '/%d_lowres%d.png' % (epoch, i))
             plt.close()
 
 if __name__ == '__main__':
     gan = SRGAN()
-    gan.train(epochs=num_epochs, batch_size=batch, sample_interval=50)
+    gan.train(epochs = args.epochs, batch_size = args.batchsize, sample_interval = 50)

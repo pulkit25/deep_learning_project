@@ -4,16 +4,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class DataLoader():
-    def __init__(self, dataset_name, img_res=(128, 128)):
+    def __init__(self, dataset_name, img_res = (128, 128)):
         self.dataset_name = dataset_name
         self.img_res = img_res
 
-    def load_data(self, batch_size=1, is_testing=False):
+    def load_data(self, batch_size = 1, is_testing = False):
         data_type = "train" if not is_testing else "test"
-        
+
         path = glob('%s/*' % (self.dataset_name))
 
-        batch_images = np.random.choice(path, size=batch_size)
+        batch_images = np.random.choice(path, size = batch_size)
 
         imgs_hr = []
         imgs_lr = []
@@ -41,4 +41,4 @@ class DataLoader():
 
 
     def imread(self, path):
-        return scipy.misc.imread(path, mode='RGB').astype(np.float)
+        return scipy.misc.imread(path, mode = 'RGB').astype(np.float)
