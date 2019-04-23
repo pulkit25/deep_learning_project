@@ -97,8 +97,6 @@ class SRGAN():
         #self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
         self.combined.compile(loss = ['binary_crossentropy', 'mse', 'mse'], loss_weights = [1e-3, 1, 1], optimizer = optimizer)
 
-        print(self.combined.metrics_names)
-
 
     def build_vgg(self):
         """
