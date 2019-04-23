@@ -93,7 +93,6 @@ class SRGAN():
 
         self.combined = Model([img_lr, img_hr], [validity, fake_features])
         self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
-        print(self.combined.metrics_names)
 
 
     def build_vgg(self):
