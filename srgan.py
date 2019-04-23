@@ -93,6 +93,7 @@ class SRGAN():
 
         self.combined = Model([img_lr, img_hr], [validity, fake_features])
         self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
+        print(self.combined.metrics_names)
 
 
     def build_vgg(self):
@@ -227,7 +228,7 @@ class SRGAN():
 
     def sample_images(self, epoch):
         os.makedirs(args.outputdir, exist_ok = True)
-        r, c = 2, 2
+        r = 2
 
         imgs_hr, imgs_lr = self.data_loader.load_data(batch_size=2, is_testing=True)
         fake_hr = self.generator.predict(imgs_lr)
@@ -237,25 +238,38 @@ class SRGAN():
         fake_hr = 0.5 * fake_hr + 0.5
         imgs_hr = 0.5 * imgs_hr + 0.5
 
-        # Save generated images and the high resolution originals
-        titles = ['Generated', 'Original']
-        fig, axs = plt.subplots(r, c)
-        cnt = 0
-        for row in range(r):
-            for col, image in enumerate([fake_hr, imgs_hr]):
-                axs[row, col].imshow(image[row])
-                axs[row, col].set_title(titles[col])
-                axs[row, col].axis('off')
-            cnt += 1
-        fig.savefig(args.outputdir + "/%d.png" % (epoch))
-        plt.close()
-
+        # Save generated images
+        for i in range(r):
+            fig = plt.figure()
+            PSNR = self.psnr(imgs_hr[i], fake_hr[i])
+            plt.title('Gen - PSNR = ' + PSNR)
+            plt.imshow(fake_hr[i])
+            fig.savefig(args.outputdir + '/%d_gen%d.png' % (epoch, i))
+            plt.close()
+            
+        # Save high resolution originals
+        for i in range(r):
+            fig = plt.figure()
+            plt.title('High res')
+            plt.imshow(imgs_hr[i])
+            fig.savefig(args.outputdir + '/%d_high_res%d.png' % (epoch, i))
+            plt.close()
+            
         # Save low resolution images for comparison
         for i in range(r):
             fig = plt.figure()
+            PSNR = self.psnr(imgs_hr[i], fake_hr[i])
+            plt.title('Low res -  PSNR = ' + PSNR)
             plt.imshow(imgs_lr[i])
             fig.savefig(args.outputdir + '/%d_lowres%d.png' % (epoch, i))
             plt.close()
+            
+    def psnr(self, y_true, y_pred):
+        assert y_true.shape == y_pred.shape, "Cannot calculate PSNR. Input shapes not same." \
+                                             " y_true shape = %s, y_pred shape = %s" % (str(y_true.shape),
+                                                                                       str(y_pred.shape))
+    
+        return -10. * np.log10(np.mean(np.square(y_pred - y_true)))
 
 if __name__ == '__main__':
     gan = SRGAN()
