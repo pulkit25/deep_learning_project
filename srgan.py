@@ -32,8 +32,8 @@ parser.add_argument('--upscale', type = int, default = 4, help = 'upscaling fact
 parser.add_argument('--inputdim', type = int, default = 64, help = 'input image dimensions(square image)')
 parser.add_argument('--nresblocks', type = int, default = 16, help = 'number of residual blocks')
 parser.add_argument('--lr', type = float, default = 0.0002, help = 'learning rate')
-parser.add_argument('--epochs', type = str, default = 10000, help = 'number of epochs')
-parser.add_argument('--batchsize', type = str, default = 1, help = 'batch size')
+parser.add_argument('--epochs', type = int, default = 10000, help = 'number of epochs')
+parser.add_argument('--batchsize', type = int, default = 1, help = 'batch size')
 args = parser.parse_args()
 
 class SRGAN():
@@ -85,14 +85,19 @@ class SRGAN():
         # Extract image features of the generated img
         fake_features = self.vgg(fake_hr)
 
-        # For the combined model we will only train the generator
+        # For the combined model we will only train the generator, freeze discriminator
         self.discriminator.trainable = False
 
         # Discriminator determines validity of generated high res. images
         validity = self.discriminator(fake_hr)
 
-        self.combined = Model([img_lr, img_hr], [validity, fake_features])
-        self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
+        #self.combined = Model([img_lr, img_hr], [validity, fake_features])
+        self.combined = Model([img_lr, img_hr], [validity, fake_features, fake_hr])
+
+        #self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
+        self.combined.compile(loss = ['binary_crossentropy', 'mse', 'mse'], loss_weights = [1e-3, 1, 1], optimizer = optimizer)
+
+        print(self.combined.metrics_names)
 
 
     def build_vgg(self):
@@ -117,8 +122,8 @@ class SRGAN():
         def residual_block(layer_input, filters):
             """Residual block described in paper"""
             d = Conv2D(filters, kernel_size = 3, strides = 1, padding = 'same')(layer_input)
-            d = Activation('relu')(d)
             d = BatchNormalization(momentum = 0.8)(d)
+            d = PReLU(shared_axes = [1, 2])(d)
             d = Conv2D(filters, kernel_size = 3, strides = 1, padding = 'same')(d)
             d = BatchNormalization(momentum = 0.8)(d)
             d = Add()([d, layer_input])
@@ -128,7 +133,7 @@ class SRGAN():
             """Layers used during upsampling"""
             u = UpSampling2D(size = 2)(layer_input)
             u = Conv2D(256, kernel_size = 3, strides = 1, padding = 'same')(u)
-            u = Activation('relu')(u)
+            u = PReLU(shared_axes = [1, 2])(u)
             return u
 
         # Low resolution image input
@@ -136,7 +141,7 @@ class SRGAN():
 
         # Pre-residual block
         c1 = Conv2D(64, kernel_size = 9, strides = 1, padding = 'same')(img_lr)
-        c1 = Activation('relu')(c1)
+        c1 = PReLU(shared_axes = [1, 2])(c1)
 
         # Propogate through residual blocks
         r = residual_block(c1, self.gf)
@@ -162,9 +167,9 @@ class SRGAN():
         def d_block(layer_input, filters, strides = 1, bn = True):
             """Discriminator layer"""
             d = Conv2D(filters, kernel_size = 3, strides = strides, padding = 'same')(layer_input)
-            d = LeakyReLU(alpha = 0.2)(d)
             if bn:
                 d = BatchNormalization(momentum = 0.8)(d)
+            d = LeakyReLU(alpha = 0.2)(d)
             return d
 
         # Input img
@@ -215,7 +220,9 @@ class SRGAN():
             image_features = self.vgg.predict(imgs_hr)
 
             # Train the generators
-            g_loss = self.combined.train_on_batch([imgs_lr, imgs_hr], [valid, image_features])
+            g_loss = self.combined.train_on_batch([imgs_lr, imgs_hr], [valid, image_features, imgs_hr])
+
+            print(g_loss)
 
             elapsed_time = datetime.datetime.now() - start_time
             # Plot the progress
@@ -229,7 +236,7 @@ class SRGAN():
         os.makedirs(args.outputdir, exist_ok = True)
         r = 2
 
-        imgs_hr, imgs_lr = self.data_loader.load_data(batch_size=2, is_testing=True)
+        imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = 2, is_testing = True)
         fake_hr = self.generator.predict(imgs_lr)
 
         # Rescale images 0 - 1

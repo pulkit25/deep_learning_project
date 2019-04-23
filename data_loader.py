@@ -1,6 +1,7 @@
 import scipy
 from glob import glob
 import numpy as np
+from scipy import ndimage, misc
 import matplotlib.pyplot as plt
 
 class DataLoader():
@@ -23,8 +24,9 @@ class DataLoader():
             h, w = self.img_res
             low_h, low_w = int(h / 4), int(w / 4)
 
-            img_hr = scipy.misc.imresize(img, self.img_res)
-            img_lr = scipy.misc.imresize(img, (low_h, low_w))
+            img_hr = misc.imresize(img, self.img_res)
+            # img_gauss = ndimage.gaussian_filter(img_hr, 5)
+            img_lr = misc.imresize(img_hr, (low_h, low_w))
 
             # If training => do random flip
             if not is_testing and np.random.random() < 0.5:
