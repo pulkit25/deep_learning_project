@@ -11,10 +11,13 @@ class DataLoader():
 
     def load_data(self, batch_size = 1, is_testing = False):
         data_type = "train" if not is_testing else "test"
-
+        
         path = glob('%s/*' % (self.dataset_name))
-
-        batch_images = np.random.choice(path, size = batch_size)
+        
+        if(batch_size == 0):
+            batch_images = np.random.choice(path, size = len(path))
+        else:
+            batch_images = np.random.choice(path, size = batch_size)
 
         imgs_hr = []
         imgs_lr = []

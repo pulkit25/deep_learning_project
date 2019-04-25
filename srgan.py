@@ -34,6 +34,7 @@ parser.add_argument('--nresblocks', type = int, default = 16, help = 'number of 
 parser.add_argument('--lr', type = float, default = 0.0002, help = 'learning rate')
 parser.add_argument('--epochs', type = int, default = 10000, help = 'number of epochs')
 parser.add_argument('--batchsize', type = int, default = 1, help = 'batch size')
+parser.add_argument('--pretrain', type = bool, default = False, help = 'Pretrain with SRResnet')
 args = parser.parse_args()
 
 class SRGAN():
@@ -74,7 +75,18 @@ class SRGAN():
 
         # Build the generator
         self.generator = self.build_generator()
-
+        
+        
+        #SRResnet pretraining
+        if(args.pretrain):
+            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = 0)
+            self.generator.compile(loss = 'mse', optimizer = optimizer)
+            self.generator.fit(imgs_lr,imgs_hr, batch_size = 32, epochs=10**5)
+            self.generator.save('SRResnet.hdf5')
+        else:
+            self.generator.load_model('SRResnet.hdf5')
+        
+        
         # High res. and low res. images
         img_hr = Input(shape = self.hr_shape)
         img_lr = Input(shape = self.lr_shape)
@@ -252,7 +264,6 @@ class SRGAN():
             plt.close()
             
         # Save high resolution originals
-        for i in range(r):
             fig = plt.figure()
             plt.title('High res')
             plt.imshow(imgs_hr[i])
@@ -260,10 +271,8 @@ class SRGAN():
             plt.close()
             
         # Save low resolution images for comparison
-        for i in range(r):
             fig = plt.figure()
-            PSNR = self.psnr(imgs_hr[i], fake_hr[i])
-            plt.title('Low res -  PSNR = ' + PSNR)
+            plt.title('Low res')
             plt.imshow(imgs_lr[i])
             fig.savefig(args.outputdir + '/%d_lowres%d.png' % (epoch, i))
             plt.close()
