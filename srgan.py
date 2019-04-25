@@ -1,12 +1,17 @@
 """
-Super-resolution of CelebA using Generative Adversarial Networks.
+Super-resolution of DIV2K using GAN
 
-The dataset can be downloaded from: https://www.dropbox.com/sh/8oqt9vytwxb3s4r/AADIKlz8PR9zr6Y20qbkunrba/Img/img_align_celeba.zip?dl=0
+The dataset can be downloaded from: http://data.vision.ee.ethz.ch/cvl/DIV2K/DIV2K_train_HR.zip
 
-Instrustion on running the script:
-1. Download the dataset from the provided link
-2. Save the folder 'img_align_celeba' to 'datasets/'
-4. Run the sript using command 'python srgan.py'
+Instruction on running the script on Ubuntu GPU machine AWS for deep learning(p3.2xlarge):
+1. Run the run.sh file.
+2. It sets up the tensorflow_p36 anaconda environment
+3. It creates the folder project in current directory
+4. Clones the codes from https://github.com/pulkit25/deep_learning_project.git
+5. It gets the data and unzips it into the dataset folder in /dev/shm/dataset/DIV2K_train_HR
+6. Installs keras_contrib in the environment
+7. Gives access permissions to the folders created by the script
+8. Run the script using command 'python srgan.py --datadir your/data/dir --outputdir your/output/dir --upscale upscaling_value(int) --inputdim lowres_img_dimension(considered to be a square image, int) --nresblocks number_of_residual_blocks(int) --lr learning_rate(float) --epochs number_epochs(int) --batch_size batch_size(int) --pretrain 0/1(whether to pretrain with SRResNet or take existing pretrained model, int) --load_img_cnt number_of_images_for_SRResNet_output(int)'. Remove any argument to use defaults.
 """
 
 from __future__ import print_function, division
@@ -17,7 +22,7 @@ from keras.layers.advanced_activations import PReLU, LeakyReLU
 from keras.activations import relu
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.applications import VGG19
-from keras.models import Model
+from keras.models import Model, load_model
 from keras.optimizers import Adam
 import datetime
 import matplotlib.pyplot as plt
@@ -36,7 +41,8 @@ parser.add_argument('--nresblocks', type = int, default = 16, help = 'number of 
 parser.add_argument('--lr', type = float, default = 0.0002, help = 'learning rate')
 parser.add_argument('--epochs', type = int, default = 1000, help = 'number of epochs')
 parser.add_argument('--batchsize', type = int, default = 1, help = 'batch size')
-parser.add_argument('--pretrain', type = bool, default = False, help = 'Pretrain with SRResnet')
+parser.add_argument('--pretrain', type = int, default = 0, help = 'Pretrain with SRResnet')
+parser.add_argument('--load_img_cnt', type = int, default = 20, help = 'Number of images to be saved')
 args = parser.parse_args()
 
 class SRGAN():
@@ -73,22 +79,25 @@ class SRGAN():
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
-        self.discriminator.compile(loss = 'mse', optimizer = optimizer, metrics = ['accuracy'])
+        self.discriminator.compile(loss = 'binary_crossentropy', optimizer = optimizer, metrics = ['accuracy'])
 
         # Build the generator
         self.generator = self.build_generator()
         
-        
         #SRResnet pretraining
         if(args.pretrain):
-            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = 0)
+            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = 200)
+            imgs_lr = np.array(imgs_lr)
+            imgs_hr = np.array(imgs_hr)
+            print(imgs_lr.shape)
+            print(imgs_hr.shape)
             self.generator.compile(loss = 'mse', optimizer = optimizer)
-            self.generator.fit(imgs_lr,imgs_hr, batch_size = 32, epochs=10**5)
+            self.generator.fit(imgs_lr, imgs_hr, batch_size = 8, epochs = 1000)
+            self.sample_images(5, args.load_img_cnt)
             self.generator.save('SRResnet.hdf5')
         else:
-            self.generator.load_model('SRResnet.hdf5')
-        
-        
+            self.generator = load_model('SRResnet.hdf5')
+
         # High res. and low res. images
         img_hr = Input(shape = self.hr_shape)
         img_lr = Input(shape = self.lr_shape)
@@ -250,14 +259,14 @@ class SRGAN():
 
             # If at save interval => save generated image samples
             if epoch % sample_interval == 0:
-                self.sample_images(epoch)
+                self.sample_images(epoch, 2)
 
 
-    def sample_images(self, epoch):
+    def sample_images(self, epoch, num_images):
         os.makedirs(args.outputdir, exist_ok = True)
-        r = 2
+        r = num_images
 
-        imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = 2, is_testing = True)
+        imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = r, is_testing = True)
         fake_hr = self.generator.predict(imgs_lr)
 
         # Rescale images 0 - 1
@@ -274,13 +283,13 @@ class SRGAN():
             fig.savefig(args.outputdir + '/%d_gen%d.png' % (epoch, i))
             plt.close()
 		
-		# Save high resolution originals
+            # Save high resolution originals
             fig = plt.figure()
             plt.title('High res')
             plt.imshow(imgs_hr[i])
             fig.savefig(args.outputdir + '/%d_high_res%d.png' % (epoch, i))
             plt.close()
-		# Save low resolution images for comparison
+            # Save low resolution images for comparison
             fig = plt.figure()
             plt.title('Low res')
             plt.imshow(imgs_lr[i])
