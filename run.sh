@@ -13,3 +13,4 @@ cd ../../
 chown -R ubuntu project
 chown -R ubuntu /dev/shm/dataset/
 cd project/deep_learning_project
+

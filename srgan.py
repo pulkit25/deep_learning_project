@@ -14,6 +14,7 @@ from keras_contrib.layers.normalization.instancenormalization import InstanceNor
 from keras.layers import Input, Dense
 from keras.layers import BatchNormalization, Activation, Add
 from keras.layers.advanced_activations import PReLU, LeakyReLU
+from keras.activations import relu
 from keras.layers.convolutional import UpSampling2D, Conv2D
 from keras.applications import VGG19
 from keras.models import Model
@@ -24,15 +25,16 @@ from data_loader import DataLoader
 import numpy as np
 import os
 import argparse
+import h5py
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', type = str, default = './data', help = 'data directory')
 parser.add_argument('--outputdir', type = str, default = './outputs', help = 'output directory')
 parser.add_argument('--upscale', type = int, default = 4, help = 'upscaling factor')
-parser.add_argument('--inputdim', type = int, default = 64, help = 'input image dimensions(square image)')
+parser.add_argument('--inputdim', type = int, default = 256, help = 'input image dimensions(square image)')
 parser.add_argument('--nresblocks', type = int, default = 16, help = 'number of residual blocks')
 parser.add_argument('--lr', type = float, default = 0.0002, help = 'learning rate')
-parser.add_argument('--epochs', type = int, default = 10000, help = 'number of epochs')
+parser.add_argument('--epochs', type = int, default = 1000, help = 'number of epochs')
 parser.add_argument('--batchsize', type = int, default = 1, help = 'batch size')
 parser.add_argument('--pretrain', type = bool, default = False, help = 'Pretrain with SRResnet')
 args = parser.parse_args()
@@ -52,7 +54,7 @@ class SRGAN():
         # Number of residual blocks in the generator
         self.n_residual_blocks = args.nresblocks
 
-        optimizer = Adam(args.lr, 0.5)
+        optimizer = Adam(args.lr)
         self.vgg = self.build_vgg()
         self.vgg.trainable = False
         self.vgg.compile(loss = 'mse', optimizer = optimizer, metrics = ['accuracy'])
@@ -103,11 +105,12 @@ class SRGAN():
         # Discriminator determines validity of generated high res. images
         validity = self.discriminator(fake_hr)
 
-        #self.combined = Model([img_lr, img_hr], [validity, fake_features])
+        # self.combined = Model([img_lr, img_hr], [validity, fake_features])
         self.combined = Model([img_lr, img_hr], [validity, fake_features, fake_hr])
 
-        #self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
-        self.combined.compile(loss = ['binary_crossentropy', 'mse', 'mse'], loss_weights = [1e-3, 1, 1], optimizer = optimizer)
+        # self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
+        self.combined.compile(loss = ['binary_crossentropy', 'mse', 'mse'], loss_weights = [1e-1, 0.006, 1], optimizer = optimizer)
+        print(self.combined.metrics_names)
 
 
     def build_vgg(self):
@@ -132,8 +135,9 @@ class SRGAN():
         def residual_block(layer_input, filters):
             """Residual block described in paper"""
             d = Conv2D(filters, kernel_size = 3, strides = 1, padding = 'same')(layer_input)
+            # d = PReLU(shared_axes = [1, 2])(d)
+            d = Activation('relu')(d)
             d = BatchNormalization(momentum = 0.8)(d)
-            d = PReLU(shared_axes = [1, 2])(d)
             d = Conv2D(filters, kernel_size = 3, strides = 1, padding = 'same')(d)
             d = BatchNormalization(momentum = 0.8)(d)
             d = Add()([d, layer_input])
@@ -143,7 +147,8 @@ class SRGAN():
             """Layers used during upsampling"""
             u = UpSampling2D(size = 2)(layer_input)
             u = Conv2D(256, kernel_size = 3, strides = 1, padding = 'same')(u)
-            u = PReLU(shared_axes = [1, 2])(u)
+            # u = PReLU(shared_axes = [1, 2])(u)
+            u = Activation('relu')(u)
             return u
 
         # Low resolution image input
@@ -151,7 +156,8 @@ class SRGAN():
 
         # Pre-residual block
         c1 = Conv2D(64, kernel_size = 9, strides = 1, padding = 'same')(img_lr)
-        c1 = PReLU(shared_axes = [1, 2])(c1)
+        # c1 = PReLU(shared_axes = [1, 2])(c1)
+        c1 = Activation('relu')(c1)
 
         # Propogate through residual blocks
         r = residual_block(c1, self.gf)
@@ -177,9 +183,9 @@ class SRGAN():
         def d_block(layer_input, filters, strides = 1, bn = True):
             """Discriminator layer"""
             d = Conv2D(filters, kernel_size = 3, strides = strides, padding = 'same')(layer_input)
+            d = LeakyReLU(alpha = 0.2)(d)
             if bn:
                 d = BatchNormalization(momentum = 0.8)(d)
-            d = LeakyReLU(alpha = 0.2)(d)
             return d
 
         # Input img
@@ -231,8 +237,12 @@ class SRGAN():
 
             # Train the generators
             g_loss = self.combined.train_on_batch([imgs_lr, imgs_hr], [valid, image_features, imgs_hr])
-
+            # g_loss = self.combined.train_on_batch([imgs_lr, imgs_hr], [valid, image_features])
             print(g_loss)
+
+            if epoch % 100 == 0:
+                with open('loss.txt', 'a') as f:
+                    f.writelines(['%.3f %.3f %.3f %.3f'%(g_loss[0], g_loss[1], g_loss[2], g_loss[3])])
 
             elapsed_time = datetime.datetime.now() - start_time
             # Plot the progress
@@ -241,6 +251,7 @@ class SRGAN():
             # If at save interval => save generated image samples
             if epoch % sample_interval == 0:
                 self.sample_images(epoch)
+
 
     def sample_images(self, epoch):
         os.makedirs(args.outputdir, exist_ok = True)
@@ -258,19 +269,18 @@ class SRGAN():
         for i in range(r):
             fig = plt.figure()
             PSNR = self.psnr(imgs_hr[i], fake_hr[i])
-            plt.title('Gen - PSNR = ' + PSNR)
+            plt.title('Gen - PSNR = ' + str(PSNR))
             plt.imshow(fake_hr[i])
             fig.savefig(args.outputdir + '/%d_gen%d.png' % (epoch, i))
             plt.close()
-            
-        # Save high resolution originals
+		
+		# Save high resolution originals
             fig = plt.figure()
             plt.title('High res')
             plt.imshow(imgs_hr[i])
             fig.savefig(args.outputdir + '/%d_high_res%d.png' % (epoch, i))
             plt.close()
-            
-        # Save low resolution images for comparison
+		# Save low resolution images for comparison
             fig = plt.figure()
             plt.title('Low res')
             plt.imshow(imgs_lr[i])
