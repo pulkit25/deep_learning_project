@@ -30,7 +30,6 @@ from data_loader import DataLoader
 import numpy as np
 import os
 import argparse
-import h5py
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', type = str, default = './data', help = 'data directory')
@@ -47,8 +46,8 @@ args = parser.parse_args()
 
 class SRGAN():
     def __init__(self):
+
         # Input shape
-        
         self.channels = 3
         self.lr_height = args.inputdim                # Low resolution height
         self.lr_width = args.inputdim                  # Low resolution width
@@ -79,23 +78,23 @@ class SRGAN():
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
-        self.discriminator.compile(loss = 'binary_crossentropy', optimizer = optimizer, metrics = ['accuracy'])
+        self.discriminator.compile(loss = 'mse', optimizer = optimizer, metrics = ['accuracy'])
 
         # Build the generator
         self.generator = self.build_generator()
         
         #SRResnet pretraining
-        if(args.pretrain):
+        if(args.pretrain == 1):
             imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = 200)
             imgs_lr = np.array(imgs_lr)
             imgs_hr = np.array(imgs_hr)
             print(imgs_lr.shape)
             print(imgs_hr.shape)
             self.generator.compile(loss = 'mse', optimizer = optimizer)
-            self.generator.fit(imgs_lr, imgs_hr, batch_size = 8, epochs = 1000)
+            self.generator.fit(imgs_lr, imgs_hr, batch_size = 8, epochs = 500)
             self.sample_images(5, args.load_img_cnt)
             self.generator.save('SRResnet.hdf5')
-        else:
+        elif args.pretrain == 2:
             self.generator = load_model('SRResnet.hdf5')
 
         # High res. and low res. images
@@ -114,11 +113,11 @@ class SRGAN():
         # Discriminator determines validity of generated high res. images
         validity = self.discriminator(fake_hr)
 
-        # self.combined = Model([img_lr, img_hr], [validity, fake_features])
-        self.combined = Model([img_lr, img_hr], [validity, fake_features, fake_hr])
+        self.combined = Model([img_lr, img_hr], [validity, fake_features])
+        # self.combined = Model([img_lr, img_hr], [validity, fake_features, fake_hr])
 
-        # self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 1], optimizer = optimizer)
-        self.combined.compile(loss = ['binary_crossentropy', 'mse', 'mse'], loss_weights = [1e-1, 0.006, 1], optimizer = optimizer)
+        self.combined.compile(loss = ['binary_crossentropy', 'mse'], loss_weights = [1e-3, 0.006], optimizer = optimizer)
+        # self.combined.compile(loss = ['binary_crossentropy', 'mse', 'mse'], loss_weights = [1e-1, 0.006, 1], optimizer = optimizer)
         print(self.combined.metrics_names)
 
 
@@ -245,13 +244,17 @@ class SRGAN():
             image_features = self.vgg.predict(imgs_hr)
 
             # Train the generators
-            g_loss = self.combined.train_on_batch([imgs_lr, imgs_hr], [valid, image_features, imgs_hr])
-            # g_loss = self.combined.train_on_batch([imgs_lr, imgs_hr], [valid, image_features])
+            # g_loss = self.combined.train_on_batch([imgs_lr, imgs_hr], [valid, image_features, imgs_hr])
+            g_loss = self.combined.train_on_batch([imgs_lr, imgs_hr], [valid, image_features])
             print(g_loss)
 
             if epoch % 100 == 0:
                 with open('loss.txt', 'a') as f:
-                    f.writelines(['%.3f %.3f %.3f %.3f'%(g_loss[0], g_loss[1], g_loss[2], g_loss[3])])
+                    f.writelines(['%.3f %.3f %.3f' % (g_loss[0], g_loss[1], g_loss[2])])
+                    # f.writelines(['%.3f %.3f %.3f %.3f'%(g_loss[0], g_loss[1], g_loss[2], g_loss[3])])
+
+            if epoch % 15000 == 14999:
+                self.combined.save('model_ckpt_%d.hdf5'%(epoch))
 
             elapsed_time = datetime.datetime.now() - start_time
             # Plot the progress
@@ -287,7 +290,7 @@ class SRGAN():
             fig = plt.figure()
             plt.title('High res')
             plt.imshow(imgs_hr[i])
-            fig.savefig(args.outputdir + '/%d_high_res%d.png' % (epoch, i))
+            fig.savefig(args.outputdir + '/%d_highres%d.png' % (epoch, i))
             plt.close()
             # Save low resolution images for comparison
             fig = plt.figure()

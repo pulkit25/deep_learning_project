@@ -27,9 +27,9 @@ class DataLoader():
             h, w = self.img_res
             low_h, low_w = int(h / 4), int(w / 4)
 
-            img_hr = misc.imresize(img, self.img_res)
+            img_hr = misc.imresize(img, self.img_res, interp = 'bicubic')
             # img_gauss = ndimage.gaussian_filter(img_hr, 5)
-            img_lr = misc.imresize(img_hr, (low_h, low_w))
+            img_lr = misc.imresize(img_hr, (low_h, low_w), interp = 'bicubic')
 
             # If training => do random flip
             if not is_testing and np.random.random() < 0.5:
@@ -46,4 +46,4 @@ class DataLoader():
 
 
     def imread(self, path):
-        return scipy.misc.imread(path, mode = 'RGB').astype(np.float)
+        return misc.imread(path, mode = 'RGB').astype(np.float)
