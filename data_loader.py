@@ -9,7 +9,7 @@ class DataLoader():
         self.dataset_name = dataset_name
         self.img_res = img_res
 
-    def load_data(self, batch_size = 1, is_testing = False):
+    def load_data(self, batch_size = 1, upscale = 4, is_testing = False):
         data_type = "train" if not is_testing else "test"
         
         path = glob('%s/*' % (self.dataset_name))
@@ -25,7 +25,7 @@ class DataLoader():
             img = self.imread(img_path)
 
             h, w = self.img_res
-            low_h, low_w = int(h / 4), int(w / 4)
+            low_h, low_w = int(h / upscale), int(w / upscale)
 
             img_hr = misc.imresize(img, self.img_res, interp = 'bicubic')
             # img_gauss = ndimage.gaussian_filter(img_hr, 5)

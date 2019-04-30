@@ -34,13 +34,16 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument('--datadir', type = str, default = './data', help = 'data directory')
 parser.add_argument('--outputdir', type = str, default = './outputs', help = 'output directory')
-parser.add_argument('--upscale', type = int, default = 4, help = 'upscaling factor')
-parser.add_argument('--inputdim', type = int, default = 256, help = 'input image dimensions(square image)')
+parser.add_argument('--upscale', type = int, default = 16, help = 'upscaling factor')
+parser.add_argument('--inputdim', type = int, default = 64, help = 'input image dimensions(square image)')
 parser.add_argument('--nresblocks', type = int, default = 16, help = 'number of residual blocks')
 parser.add_argument('--lr', type = float, default = 0.0002, help = 'learning rate')
-parser.add_argument('--epochs', type = int, default = 1000, help = 'number of epochs')
+parser.add_argument('--epochs', type = int, default = 10000, help = 'number of epochs')
 parser.add_argument('--batchsize', type = int, default = 1, help = 'batch size')
 parser.add_argument('--pretrain', type = int, default = 0, help = 'Pretrain with SRResnet')
+parser.add_argument('--pretrain_epochs', type = int, default = 100, help = 'Pretrain epochs')
+parser.add_argument('--pretrain_batchsize', type = int, default = 8, help = 'Pretrain batch size')
+parser.add_argument('--pretrain_images', type = int, default = 200, help = 'Pretrain images')
 parser.add_argument('--load_img_cnt', type = int, default = 20, help = 'Number of images to be saved')
 args = parser.parse_args()
 
@@ -85,13 +88,13 @@ class SRGAN():
         
         #SRResnet pretraining
         if(args.pretrain == 1):
-            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = 200)
+            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = args.pretrain_images, upscale = args.upscale)
             imgs_lr = np.array(imgs_lr)
             imgs_hr = np.array(imgs_hr)
             print(imgs_lr.shape)
             print(imgs_hr.shape)
             self.generator.compile(loss = 'mse', optimizer = optimizer)
-            self.generator.fit(imgs_lr, imgs_hr, batch_size = 8, epochs = 500)
+            self.generator.fit(imgs_lr, imgs_hr, batch_size = args.pretrain_batchsize, epochs = args.pretrain_epochs)
             self.sample_images(5, args.load_img_cnt)
             self.generator.save('SRResnet.hdf5')
         elif args.pretrain == 2:
@@ -153,7 +156,7 @@ class SRGAN():
 
         def deconv2d(layer_input):
             """Layers used during upsampling"""
-            u = UpSampling2D(size = 2)(layer_input)
+            u = UpSampling2D(size = 2, interpolation = 'nearest')(layer_input)
             u = Conv2D(256, kernel_size = 3, strides = 1, padding = 'same')(u)
             # u = PReLU(shared_axes = [1, 2])(u)
             u = Activation('relu')(u)
@@ -175,11 +178,11 @@ class SRGAN():
         # Post-residual block
         c2 = Conv2D(64, kernel_size = 3, strides = 1, padding = 'same')(r)
         c2 = BatchNormalization(momentum = 0.8)(c2)
-        c2 = Add()([c2, c1])
+        u2 = Add()([c2, c1])
 
         # Upsampling
-        u1 = deconv2d(c2)
-        u2 = deconv2d(u1)
+        for i in range(int(np.log2(args.upscale))):
+            u2 = deconv2d(u2)
 
         # Generate high resolution output
         gen_hr = Conv2D(self.channels, kernel_size = 9, strides = 1, padding = 'same', activation = 'tanh')(u2)
@@ -221,7 +224,7 @@ class SRGAN():
         for epoch in range(epochs):
 
             # Sample images and their conditioning counterparts
-            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size)
+            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size, args.upscale)
 
             # From low res. image generate high res. version
             fake_hr = self.generator.predict(imgs_lr)
@@ -235,7 +238,7 @@ class SRGAN():
             d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
             # Sample images and their conditioning counterparts
-            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size)
+            imgs_hr, imgs_lr = self.data_loader.load_data(batch_size, args.upscale)
 
             # The generators want the discriminators to label the generated images as real
             valid = np.ones((batch_size,) + self.disc_patch)
@@ -253,8 +256,11 @@ class SRGAN():
                     f.writelines(['%.3f %.3f %.3f' % (g_loss[0], g_loss[1], g_loss[2])])
                     # f.writelines(['%.3f %.3f %.3f %.3f'%(g_loss[0], g_loss[1], g_loss[2], g_loss[3])])
 
-            if epoch % 15000 == 14999:
+            if epoch % 10000 == 9999:
                 self.combined.save('model_ckpt_%d.hdf5'%(epoch))
+
+            if epoch % 2500 == 2499:
+                self.generator.save('generator_model.hdf5')
 
             elapsed_time = datetime.datetime.now() - start_time
             # Plot the progress
@@ -269,7 +275,7 @@ class SRGAN():
         os.makedirs(args.outputdir, exist_ok = True)
         r = num_images
 
-        imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = r, is_testing = True)
+        imgs_hr, imgs_lr = self.data_loader.load_data(batch_size = r, upscale = args.upscale, is_testing = True)
         fake_hr = self.generator.predict(imgs_lr)
 
         # Rescale images 0 - 1
